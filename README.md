@@ -1,6 +1,7 @@
 # odoo_sped
 Sped ICMS-IPI
 
+Modulo nfe_purchase_import , não é utilizado mais, o xml de entrada é importado direto no invoice_eletronic , com o modulo br_account_invoice_xml.
 
 Adicionado na invoice_eletronic o campo :
 
