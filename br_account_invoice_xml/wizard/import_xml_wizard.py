@@ -207,7 +207,7 @@ class ImportXmlWizard(models.TransientModel):
                             vals['fiscal_classification_id'] = pf_ids.id
                             product = self.env['product.product'].create(vals)
                             break
-        import pudb;pu.db
+        
         if not self.localiza_produto:
             product = self.not_found_product[num_item-1].product_invoice.product_id
         #item_edoc = edoc.eletronic_item_ids[num_item-1]
@@ -375,9 +375,6 @@ class ImportXmlWizard(models.TransientModel):
         print (resposta['received_xml'])
 
     def manifestar_nfe(self):
-        #certificado = open("/path/certificado.pfx", "r").read()
-        #certificado = Certificado(certificado, 'senha_pfx')
-        import pudb;pu.db
         fatura = self.env['account.invoice'].browse(self._context.get('invoice_id'))
         cert = fatura.company_id.with_context(
             {'bin_size': False}).nfe_a1_file
