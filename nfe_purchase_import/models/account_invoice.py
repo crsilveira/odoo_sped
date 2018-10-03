@@ -3,6 +3,7 @@
 
 from odoo import api, fields, models, _
 from datetime import date, datetime
+from odoo.addons import decimal_precision as dp
 
 class AccountInvoice(models.Model):
     _inherit = 'account.invoice'
