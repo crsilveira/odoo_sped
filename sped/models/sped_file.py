@@ -35,6 +35,7 @@ from sped.efd.icms_ipi.registros import Registro1010
 #from sped.efd.icms_ipi.registros import Registro9900
 
 g_intervalo = [ None, None ]
+periodo = ''
 
 
 class SpedFile(models.Model):
@@ -96,8 +97,12 @@ class SpedFile(models.Model):
 
     @api.multi
     def create_file(self):
-        #global arq
-        
+        global periodo
+        periodo = ' ((extract(month from (ie.data_fatura at time zone \'utc\')) = %s' %(self.date_start[5:7])
+        periodo += ' and extract(year from (ie.data_fatura at time zone \'utc\')) = %s)' %(self.date_start[:4])
+        periodo += ' or (ie.data_fatura is null '
+        periodo += ' and extract(month from (ie.data_emissao at time zone \'utc\')) = %s' %(self.date_start[5:7])
+        periodo += ' and extract(year from (ie.data_emissao at time zone \'utc\')) = %s))' %(self.date_start[:4])
         if self.date_start > self.date_end:
             raise UserError('Erro, a data de início é maior que a data de encerramento!')
         num_mes = 1
@@ -117,7 +122,8 @@ class SpedFile(models.Model):
                 ('product_document_id.code', '=', '55'),
                 ])
             self.registro0000(inv)
-            self.log_faturamento = 'Arquivo gerado com sucesso. <br />'
+            if not self.log_faturamento:
+                self.log_faturamento = 'Arquivo gerado com sucesso. <br />'
         return {
             "type": "ir.actions.do_nothing",
         }
@@ -165,14 +171,14 @@ class SpedFile(models.Model):
 
     def registro0000(self, inv):
         arq = ArquivoDigital()
-        dta_e = g_intervalo[1]
+        dta_e = self.date_end # g_intervalo[1]
         cod_mun = '%s%s' %(self.company_id.state_id.ibge_code, self.company_id.city_id.ibge_code)
-        dta_s = '%s%s%s' %(g_intervalo[0][8:10],g_intervalo[0][5:7],g_intervalo[0][:4])
+        dta_s = '%s%s%s' %(self.date_start[8:10],self.date_start[5:7],self.date_start[:4])
         dta_e = '%s%s%s' %(dta_e[8:10],dta_e[5:7],dta_e[:4])
         arq._registro_abertura.COD_VER = self.versao()
         arq._registro_abertura.COD_FIN = self.tipo_arquivo
-        arq._registro_abertura.DT_INI = dta_s # self.transforma_data(g_intervalo[0])
-        arq._registro_abertura.DT_FIN = dta_e # self.transforma_data(g_intervalo[1])
+        arq._registro_abertura.DT_INI = self.transforma_data(g_intervalo[0])
+        arq._registro_abertura.DT_FIN = self.transforma_data(g_intervalo[1])
         arq._registro_abertura.NOME = self.company_id.legal_name
         arq._registro_abertura.CNPJ = self.limpa_formatacao(self.company_id.cnpj_cpf)
         arq._registro_abertura.UF = self.company_id.state_id.code
@@ -231,8 +237,7 @@ class SpedFile(models.Model):
             # 0220 - Conversão Unidade Medida
             for item_unit in self.query_registro0220(item_lista.COD_ITEM):            
                 arq.read_registro(self.junta_pipe(item_unit))
-            
-            
+
         for item_lista in self.query_registro0400():
             arq.read_registro(self.junta_pipe(item_lista))
 
@@ -242,6 +247,7 @@ class SpedFile(models.Model):
         else:
             regC001.IND_MOV = '1'
         arq._blocos['C'].add(regC001)
+
         query = """
                     select distinct
                         d.id, d.state, ie.emissao_doc, d.product_document_id 
@@ -254,11 +260,11 @@ class SpedFile(models.Model):
                         br_account_fiscal_document fd
                             on fd.id = d.product_document_id  
                     where
-                        ie.data_emissao between '%s' and '%s'
+                        %s
                         and (fd.code in ('55','01'))
                         and ie.state in ('done', 'cancel')
                         and d.fiscal_position_id is not null                        
-                """ % (g_intervalo[0], g_intervalo[1])
+                """ % (periodo)
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
         lista = []
@@ -301,11 +307,11 @@ class SpedFile(models.Model):
                         br_account_fiscal_document fd
                             on fd.id = d.product_document_id  
                     where
-                        ie.data_emissao between '%s' and '%s'
+                        %s
                         and (fd.code in ('57','67'))
                         and ie.state = 'done'
                         and d.fiscal_position_id is not null                        
-                """ % (g_intervalo[0], g_intervalo[1])
+                """ % (periodo)
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
         lista = []
@@ -409,9 +415,6 @@ class SpedFile(models.Model):
         #sped_f = codecs.open(os.path.abspath(), mode='r', encoding='utf-8')
         self.sped_file_name =  "Sped-%s_%s.txt" % (g_intervalo[0][5:7],g_intervalo[0][:4])
         self.sped_file = base64.encodestring(bytes(arq.getstring(), 'utf-8'))
-        #self.sped_file = arq.getstring()
-        
-
 
     def query_registro0150(self):
         query = """
@@ -420,18 +423,18 @@ class SpedFile(models.Model):
                     from
                         account_invoice as d
                     inner join
-                        invoice_eletronic nf
-                            on nf.invoice_id = d.id        
-                    left join     
-                        br_account_fiscal_document fd 
+                        invoice_eletronic ie
+                            on ie.invoice_id = d.id
+                    left join
+                        br_account_fiscal_document fd
                             on fd.id = d.product_document_id
                     where
-                        nf.data_emissao between '%s' and '%s'       
+                        %s
                         and (fd.code in ('55','01','57','67'))
                         and d.state in ('open','paid')
-                        and (nf.state = 'done')
-                        and d.fiscal_position_id is not null 
-                """ % (g_intervalo[0], g_intervalo[1])
+                        and (ie.state = 'done')
+                        and d.fiscal_position_id is not null
+                """ % (periodo)
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
         lista = []
@@ -439,7 +442,7 @@ class SpedFile(models.Model):
             resposta_participante = self.env['res.partner'].browse(id[0])
             registro_0150 = registros.Registro0150()
             registro_0150.COD_PART = str(resposta_participante.id)
-            registro_0150.NOME = self.normalize_str(resposta_participante.legal_name or resposta_participante.name) 
+            registro_0150.NOME = self.normalize_str(resposta_participante.legal_name or resposta_participante.name)
             registro_0150.COD_PAIS = resposta_participante.country_id.bc_code
             cpnj_cpf = self.limpa_formatacao(resposta_participante.cnpj_cpf)
             if len(cpnj_cpf) == 11:
@@ -467,21 +470,21 @@ class SpedFile(models.Model):
                         invoice_eletronic as ie
                     inner join
                         invoice_eletronic_item as det
-                            on ie.id = det.invoice_eletronic_id 
+                            on ie.id = det.invoice_eletronic_id
                     inner join product_product pp
-                        on pp.id = det.product_id    
+                        on pp.id = det.product_id
                     inner join product_template pt
                        on pt.id = pp.product_tmpl_id
                     inner join
                         product_uom pu
                             on pu.id = det.uom_id or pu.id = pt.uom_id
                     where
-                        ie.data_emissao between '%s' and '%s' 
+                        %s
                         and (ie.model in ('55','01'))
                         and ie.state = 'done'
                         and ie.emissao_doc = '2'
                     order by 1
-                """ % (g_intervalo[0], g_intervalo[1])
+                """ % (periodo)
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
         lista = []
@@ -512,22 +515,20 @@ class SpedFile(models.Model):
                         invoice_eletronic_item as det 
                             on ie.id = det.invoice_eletronic_id
                     where
-                        ie.data_emissao between '%s' and '%s' 
+                        %s
                         and (ie.model in ('55','01'))
                         and ie.state = 'done'
                         and ie.emissao_doc = '2'
-                """ % (g_intervalo[0], g_intervalo[1])
+                """ % (periodo)
 
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
-        #hash = {}
         lista = []
         cont = 1
         for resposta in query_resposta:
             resposta_produto = self.env['product.product'].browse(resposta[0])
             if not resposta_produto:
                 continue
-            #if not (resposta_produto.codigo_unico in hash):
             registro_0200 = registros.Registro0200()
             registro_0200.COD_ITEM = resposta_produto.default_code
             registro_0200.DESCR_ITEM = self.normalize_str(resposta_produto.name.strip())
@@ -599,36 +600,35 @@ class SpedFile(models.Model):
                    ,det.product_id
                    ,UPPER(TRIM(uom_edoc.name))
                     from
-                        invoice_eletronic as d                
+                        invoice_eletronic as ie
                     inner join
                         invoice_eletronic_item as det
-                            on d.id = det.invoice_eletronic_id
-                    inner join 
+                            on ie.id = det.invoice_eletronic_id
+                    inner join
                         account_invoice_line as dl
-                            on dl.invoice_id = d.invoice_id
+                            on dl.invoice_id = ie.invoice_id
                             and dl.product_id = det.product_id
                     inner join
                         product_product p
                             on p.id = det.product_id
                     inner join
                         product_template pt
-                            on p.product_tmpl_id = pt.id                            
+                            on p.product_tmpl_id = pt.id
                     inner join
                         product_uom pu
                             on pu.id = pt.uom_id
                     inner join
                         product_uom as uom_edoc
                             on uom_edoc.id = det.uom_id
-                            
                     where
-                        d.data_emissao between '%s' and '%s'
-                        and (d.model in ('55','01'))
-                        and d.state = 'done'
-                        and d.emissao_doc = '2' 
+                        %s
+                        and (ie.model in ('55','01'))
+                        and ie.state = 'done'
+                        and ie.emissao_doc = '2'
                         and UPPER(TRIM(pu.name)) <> UPPER(TRIM(uom_edoc.name))
                         and p.default_code = '%s'
                         group by  det.product_id ,pu.name,uom_edoc.name                                 
-                """ % (g_intervalo[0], g_intervalo[1], ITEM)
+                """ % (periodo, ITEM)
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
         lista = []
@@ -651,16 +651,16 @@ class SpedFile(models.Model):
                     inner join
                         invoice_eletronic as ie
                             on ie.invoice_id = d.id
-                    left join     
-                        br_account_fiscal_document fd 
+                    left join
+                        br_account_fiscal_document fd
                             on fd.id = d.product_document_id
                     where
-                        ie.data_emissao between '%s' and '%s'                        
+                        %s
                         and (ie.model in ('55','01'))
                         and ie.emissao_doc = '2'
                         and ie.state in ('done','cancel')
-                        and d.fiscal_position_id is not null 
-                """ % (g_intervalo[0], g_intervalo[1])
+                        and d.fiscal_position_id is not null
+                """ % (periodo)
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
         lista = []
@@ -670,7 +670,7 @@ class SpedFile(models.Model):
             registro_0400.COD_NAT = str(resposta_nat.id)
             registro_0400.DESCR_NAT = self.normalize_str(resposta_nat.natureza_operacao)
             lista.append(registro_0400)
-        return lista        
+        return lista
 
     def transforma_valor(self, valor):
         valor = ("%.2f" % (float(valor)))
@@ -679,17 +679,21 @@ class SpedFile(models.Model):
     def query_registroC100(self, fatura):
         lista = []
         resposta = self.env['account.invoice'].browse(self.fatura)
-        resposta_nfe = self.env['invoice.eletronic'].search([('invoice_id','=',self.fatura)])
-        if (resposta.product_document_id or resposta.state in ['open','paid','cancel']) and \
-            (resposta.product_document_id.code == '55'):
-            # removendo Emissao de Terceiros canceladas
-            if resposta_nfe.emissao_doc == '2' and resposta.state == 'cancel':
-                 return True
-            #if not resposta.nfe_modelo and resposta.product_document_id.code == '55':
-            #    if not resposta_nfe:
-            #        continue
-            if resposta:
-                cancel = False 
+        nfe_ids = self.env['invoice.eletronic'].search([
+            ('invoice_id','=',self.fatura)])
+        if len(nfe_ids) > 1:
+            msg_err = 'A Fatura %s possui dois documentos \
+                Eletronicos, esta correto ?. <br />' %(
+                    str(resposta.number or resposta.id))
+            self.log_faturamento += msg_err
+        for resposta_nfe in nfe_ids:
+            if (resposta.product_document_id or \
+                resposta.state in ['open','paid','cancel']) and \
+                (resposta.product_document_id.code == '55'):
+                # removendo Emissao de Terceiros canceladas
+                if resposta_nfe.emissao_doc == '2' and resposta.state == 'cancel':
+                    return True
+                cancel = False
                 registro_c100 = registros.RegistroC100()
                 if resposta.fiscal_position_id.fiscal_type == 'entrada':
                     registro_c100.IND_OPER = '0'
@@ -697,18 +701,28 @@ class SpedFile(models.Model):
                 else:
                     registro_c100.IND_OPER = '1'
                     #print ('SAIDA')
-                if resposta_nfe.emissao_doc == '1':    
+                if resposta_nfe.emissao_doc == '1':
                     registro_c100.IND_EMIT = '0'
                 else:
                     registro_c100.IND_EMIT = '1'
-                registro_c100.COD_MOD = (resposta.nfe_modelo or resposta.product_document_id.code).zfill(2)
+                registro_c100.COD_MOD = (resposta.nfe_modelo or \
+                    resposta.product_document_id.code).zfill(2)
                 if resposta_nfe.state == 'cancel':
                     registro_c100.COD_SIT = '02'
                     cancel = True
                 elif resposta_nfe.finalidade_emissao == '1':
-                    registro_c100.COD_SIT = '00'
+                    emis = '%s-%s' %(resposta_nfe.data_emissao[5:7], resposta_nfe.data_emissao[:4])
+                    arq = '%s-%s' %(self.date_start[5:7], self.date_start[:4])
+                    if (emis !=  arq):
+                        registro_c100.COD_SIT = '01'
+                    else:
+                        registro_c100.COD_SIT = '00'
                 elif resposta_nfe.finalidade_emissao == '2':
-                    registro_c100.COD_SIT = '06'                    
+                    registro_c100.COD_SIT = '06'
+                elif resposta_nfe.finalidade_emissao == '4':
+                    registro_c100.COD_SIT = '00'
+                elif resposta_nfe.state  == 'denied':
+                    registro_c100.COD_SIT = '04'
                 if resposta.nfe_serie:
                     registro_c100.SER = resposta.nfe_serie[:3]
                 else:
@@ -729,10 +743,10 @@ class SpedFile(models.Model):
                 #print (str(resposta_nfe.numero))
                 if not cancel:
                     try:
-                        registro_c100.DT_DOC  = self.transforma_data( 
+                        registro_c100.DT_DOC  = self.transforma_data(
                             resposta_nfe.data_emissao)
                         if resposta_nfe.data_fatura:
-                            registro_c100.DT_E_S  = self.transforma_data( 
+                            registro_c100.DT_E_S  = self.transforma_data(
                                 resposta_nfe.data_fatura)
                         else:
                             registro_c100.DT_E_S  = self.transforma_data( 
@@ -741,7 +755,7 @@ class SpedFile(models.Model):
                         msg_err = 'Data Emissao Fatura %s , invalida. <br />' %(str(resposta.number or resposta.id))
                         #raise UserError(msg_err)
                         self.log_faturamento += msg_err
-                       
+
                     if resposta.receivable_move_line_ids:
                         if len(resposta.receivable_move_line_ids) == 1:
                             if resposta.receivable_move_line_ids.date_maturity == resposta.date_invoice:
@@ -847,10 +861,12 @@ class SpedFile(models.Model):
         #cont = 1
         #for id in query_resposta:
         resposta = self.env['account.invoice'].browse(self.fatura)
-        r_nfe = self.env['invoice.eletronic'].search([('invoice_id','=',self.fatura)])
-        if r_nfe.emissao_doc == '2':
-            n_item = 1
-            for item in r_nfe.eletronic_item_ids:
+        r_nfe = self.env['invoice.eletronic'].search([
+            ('invoice_id','=',self.fatura),
+            ('emissao_doc','=','2')])
+        n_item = 1
+        for nf in r_nfe:
+            for item in nf.eletronic_item_ids:
                 registro_c170 = registros.RegistroC170()
                 #registro_c170.NUM_ITEM = str(n_item)
                 registro_c170.NUM_ITEM = str(item.num_item or n_item) # str(item.num_item_xml or n_item)
@@ -957,8 +973,8 @@ class SpedFile(models.Model):
                         account_invoice_line dl
                             on dl.invoice_id = d.id 
                     left join
-                        invoice_eletronic il
-                            on il.invoice_id = d.id
+                        invoice_eletronic ie
+                            on ie.invoice_id = d.id
                     left join
                         account_tax at
                             on at.id = dl.tax_icms_id
@@ -981,7 +997,7 @@ class SpedFile(models.Model):
                         ((fd.code='55') or (d.nfe_modelo = '55') or (d.nfe_modelo = '1'))
                         and d.state in ('open','paid')
                         and d.fiscal_position_id is not null
-                        and ((il.state is null) or (il.state = 'done'))
+                        and ((ie.state is null) or (ie.state = 'done'))
                         and d.id = '%s' 
                     group by 
                         dl.icms_aliquota_reducao_base,
@@ -1182,8 +1198,8 @@ class SpedFile(models.Model):
                         and d.fiscal_position_id is not null 
                         and (ie.state = 'done')
                         and ((substr(cfop.code, 1,1) in ('5','6','7')) or (cfop.code = '1605'))
-                        and ie.data_emissao between '%s' and '%s'
-                """ % (g_intervalo[0], g_intervalo[1])
+                        and %s
+                """ % (periodo)
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
         lista = []
@@ -1217,8 +1233,8 @@ class SpedFile(models.Model):
                         and d.fiscal_position_id is not null 
                         and (ie.state = 'done')
                         and (((substr(cfop.code, 1,1) in ('1','2','3')) and cfop.code not in ('1605')) or (cfop.code = '5605'))
-                        and ie.data_emissao between '%s' and '%s'
-                """ % (g_intervalo[0], g_intervalo[1])
+                        and %s
+                """ % (periodo)
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
         for id in query_resposta:
@@ -1261,8 +1277,8 @@ class SpedFile(models.Model):
                         account_invoice_line dl
                             on dl.invoice_id = d.id 
                     left join
-                        invoice_eletronic il
-                            on il.invoice_id = d.id
+                        invoice_eletronic ie
+                            on ie.invoice_id = d.id
                     left join
                         account_tax at
                             on at.id = dl.tax_icms_id
@@ -1285,10 +1301,10 @@ class SpedFile(models.Model):
                         ((fd.code='55') or (d.nfe_modelo = '55') or (d.nfe_modelo = '1'))
                         and d.state in ('open','paid')
                         and d.fiscal_position_id is not null
-                        and ((il.state is null) or (il.state = 'done'))
+                        and ((ie.state is null) or (ie.state = 'done'))
                         and dl.icms_st_valor > 0
-                        and d.date_invoice between '%s' and '%s'
-                """ % (g_intervalo[0], g_intervalo[1])
+                        and %s
+                """ % (periodo)
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
         lista = []
@@ -1313,8 +1329,8 @@ class SpedFile(models.Model):
                         account_invoice_line dl
                             on dl.invoice_id = d.id 
                     left join
-                        invoice_eletronic il
-                            on il.invoice_id = d.id
+                        invoice_eletronic ie
+                            on ie.invoice_id = d.id
                     left join
                         account_tax at
                             on at.id = dl.tax_icms_id
@@ -1337,11 +1353,11 @@ class SpedFile(models.Model):
                         ((fd.code='55') or (d.nfe_modelo = '55') or (d.nfe_modelo = '1'))
                         and d.state in ('open','paid')
                         and d.fiscal_position_id is not null
-                        and ((il.state is null) or (il.state = 'done'))
+                        and ((ie.state is null) or (ie.state = 'done'))
                         and dl.icms_st_valor > 0
                         and rs.code = '%s'
-                        and d.date_invoice between '%s' and '%s'
-                """ % (uf, g_intervalo[0], g_intervalo[1])
+                        and %s
+                """ % (uf, periodo)
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
         lista = []
@@ -1374,6 +1390,9 @@ class SpedFile(models.Model):
                     from
                         account_invoice as d
                     inner join
+                        invoice_eletronic ie
+                            on ie.invoice_id = d.id
+                    inner join
                         res_partner as rp
                             on rp.id = d.partner_id
                     inner join
@@ -1388,8 +1407,8 @@ class SpedFile(models.Model):
                         and d.fiscal_position_id is not null 
                         and ((d.valor_icms_uf_dest > 0) or 
                         (d.valor_icms_uf_remet > 0))
-                        and d.date_invoice between '%s' and '%s'
-                """ % (g_intervalo[0], g_intervalo[1])
+                        and %s
+                """ % (periodo)
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
         lista = []
@@ -1423,6 +1442,9 @@ class SpedFile(models.Model):
                     from
                         account_invoice as d
                     inner join
+                        invoice_eletronic ie
+                            on ie.invoice_id = d.id
+                    inner join
                         res_partner as rp
                             on rp.id = d.partner_id
                     inner join
@@ -1441,9 +1463,9 @@ class SpedFile(models.Model):
                         and ((d.valor_icms_uf_dest > 0) or 
                         (d.valor_icms_uf_remet > 0))
                         and rs.code = '%s'
-                        and d.date_invoice between '%s' and '%s'
+                        and %s
                     group by fp.fiscal_type
-                """ % (uf_dif, g_intervalo[0], g_intervalo[1])
+                """ % (uf_dif, periodo)
         else:   
             # mesmo uf
             tipo_mov = '0'
@@ -1455,6 +1477,9 @@ class SpedFile(models.Model):
                         fp.fiscal_type
                     from
                         account_invoice as d
+                    inner join
+                        invoice_eletronic ie
+                            on ie.invoice_id = d.id
                     inner join
                         res_partner as rp
                             on rp.id = d.partner_id
@@ -1473,9 +1498,9 @@ class SpedFile(models.Model):
                         and d.fiscal_position_id is not null 
                         and ((d.valor_icms_uf_dest > 0) or 
                         (d.valor_icms_uf_remet > 0))
-                        and d.date_invoice between '%s' and '%s'
+                        and %s
                     group by fp.fiscal_type
-                """ % (g_intervalo[0], g_intervalo[1])
+                """ % (periodo)
                
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
@@ -1520,6 +1545,9 @@ class SpedFile(models.Model):
                     from
                         account_invoice as d
                     inner join
+                        invoice_eletronic ie
+                            on ie.invoice_id = d.id
+                    inner join
                         res_partner as rp
                             on rp.id = d.partner_id
                     inner join
@@ -1538,9 +1566,9 @@ class SpedFile(models.Model):
                         and ((d.valor_icms_uf_dest > 0) or 
                         (d.valor_icms_uf_remet > 0))
                         and rs.code = '%s'
-                        and d.date_invoice between '%s' and '%s'
+                        and %s
                     group by fp.fiscal_type
-                """ % (uf_dif, g_intervalo[0], g_intervalo[1])
+                """ % (uf_dif, periodo)
         else:   
             # mesmo uf
             tipo_mov = '0'
@@ -1552,6 +1580,9 @@ class SpedFile(models.Model):
                         fp.fiscal_type
                     from
                         account_invoice as d
+                    inner join
+                        invoice_eletronic ie
+                            on ie.invoice_id = d.id
                     inner join
                         res_partner as rp
                             on rp.id = d.partner_id
@@ -1570,9 +1601,9 @@ class SpedFile(models.Model):
                         and d.fiscal_position_id is not null 
                         and ((d.valor_icms_uf_dest > 0) or 
                         (d.valor_icms_uf_remet > 0))
-                        and d.date_invoice between '%s' and '%s'
+                        and %s
                     group by fp.fiscal_type
-                """ % (g_intervalo[0], g_intervalo[1])
+                """ % (periodo)
                
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
@@ -1626,10 +1657,10 @@ class SpedFile(models.Model):
                         ((fd.code='55') or (d.nfe_modelo = '55') or (d.nfe_modelo = '1'))
                         and d.state in ('open','paid')
                         and d.fiscal_position_id is not null 
-                        and ie.data_emissao between '%s' and '%s'
+                        and %s
                     group by dl.ipi_cst,
                         cfop.code
-                """ % (g_intervalo[0], g_intervalo[1])
+                """ % (periodo)
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
         lista = []
@@ -1673,8 +1704,8 @@ class SpedFile(models.Model):
                         and d.state in ('open','paid')
                         and d.fiscal_position_id is not null 
                         and substr(cfop.code, 1,1) in ('5','6')
-                        and ie.data_emissao between '%s' and '%s'
-                """ % (g_intervalo[0], g_intervalo[1])
+                        and %s
+                """ % (periodo)
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
         lista = []
@@ -1715,8 +1746,8 @@ class SpedFile(models.Model):
                         and d.state in ('open','paid')
                         and d.fiscal_position_id is not null 
                         and substr(cfop.code, 1,1) in ('1','2','3')
-                        and ie.data_emissao between '%s' and '%s'
-                """ % (g_intervalo[0], g_intervalo[1])
+                        and %s
+                """ % (periodo)
         self._cr.execute(query)
         query_resposta = self._cr.fetchall()
         for id in query_resposta:            
