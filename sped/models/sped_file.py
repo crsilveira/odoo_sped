@@ -273,7 +273,8 @@ class SpedFile(models.Model):
             if id[2] == '2' and id[1] == 'cancel':
                 continue
             self.fatura = id[0]
-            #if self.fatura == 222:
+            #if self.fatura == 2874:
+            #    import pudb;pu.db
             # TODO C100 - Notas Fiscais - Feito        
             for item_lista in self.query_registroC100(self.fatura):
                 arq.read_registro(self.junta_pipe(item_lista))
@@ -689,7 +690,7 @@ class SpedFile(models.Model):
         for resposta_nfe in nfe_ids:
             if (resposta.product_document_id or \
                 resposta.state in ['open','paid','cancel']) and \
-                (resposta.product_document_id.code == '55'):
+                (resposta.product_document_id.code in ('55','01')):
                 # removendo Emissao de Terceiros canceladas
                 if resposta_nfe.emissao_doc == '2' and resposta.state == 'cancel':
                     return True
@@ -711,12 +712,14 @@ class SpedFile(models.Model):
                     registro_c100.COD_SIT = '02'
                     cancel = True
                 elif resposta_nfe.finalidade_emissao == '1':
+                    """
                     emis = '%s-%s' %(resposta_nfe.data_emissao[5:7], resposta_nfe.data_emissao[:4])
                     arq = '%s-%s' %(self.date_start[5:7], self.date_start[:4])
                     if (emis !=  arq):
                         registro_c100.COD_SIT = '01'
                     else:
-                        registro_c100.COD_SIT = '00'
+                    """
+                    registro_c100.COD_SIT = '00'
                 elif resposta_nfe.finalidade_emissao == '2':
                     registro_c100.COD_SIT = '06'
                 elif resposta_nfe.finalidade_emissao == '4':
@@ -804,6 +807,9 @@ class SpedFile(models.Model):
                         fp.fiscal_type 
                     from
                         account_invoice as d
+                    inner join
+                        invoice_eletronic as ie
+                            on ie.invoice_id = d.id
                     left join     
                         br_account_fiscal_document fd
                             on fd.id = d.product_document_id  
@@ -814,6 +820,7 @@ class SpedFile(models.Model):
                         d.id = '%s'
                         and ((fd.code='55') or (d.nfe_modelo = '55') or (d.nfe_modelo = '1'))
                         and d.state in ('open','paid')
+                        and ie.state in ('done')
                         and d.fiscal_position_id is not null 
                         and ((d.valor_icms_uf_dest > 0) or 
                         (d.valor_icms_uf_remet > 0))
@@ -850,7 +857,7 @@ class SpedFile(models.Model):
                             on fd.id = d.product_document_id  
                     where
                         d.id = '%s'                        
-                        and ((fd.code='55') or (d.nfe_modelo = '55'))
+                        and ((fd.code in ('55','01')) or (d.nfe_modelo in ('55','01')))
                         and d.state in ('open','paid', 'cancel')
                         and d.fiscal_position_id is not null                        
         #
@@ -905,7 +912,7 @@ class SpedFile(models.Model):
                 else:
                     registro_c170.IND_MOV = '0'
                 try:
-                    registro_c170.CST_ICMS = item.product_id.origin + item.icms_cst
+                    registro_c170.CST_ICMS = item.origem + item.icms_cst
                 except:
                     msg_err = 'Sem CST na Fatura %s. <br />' %(str(resposta.number or resposta.id))
                     #raise UserError(msg_err)
@@ -956,7 +963,7 @@ class SpedFile(models.Model):
     def query_registroC190(self, fatura):
         query = """
                 select distinct
-                        pt.origin || dl.icms_cst_normal,
+                        dl.icms_origem || dl.icms_cst_normal,
                         cfop.code,
                         COALESCE(at.amount, 0.0) as ALIQUOTA ,
                         sum(dl.price_subtotal+dl.outras_despesas) as VL_OPR,
@@ -994,7 +1001,7 @@ class SpedFile(models.Model):
                         product_template pt
                             on pt.id = pp.product_tmpl_id
                     where    
-                        ((fd.code='55') or (d.nfe_modelo = '55') or (d.nfe_modelo = '1'))
+                        ((fd.code='55') or (d.nfe_modelo in ('55', '01')))
                         and d.state in ('open','paid')
                         and d.fiscal_position_id is not null
                         and ((ie.state is null) or (ie.state = 'done'))
@@ -1004,7 +1011,7 @@ class SpedFile(models.Model):
                         dl.icms_cst_normal,
                         cfop.code,
                         at.amount,
-                        pt.origin 
+                        dl.icms_origem 
                     order by 1,2,3    
                 """ % (fatura)
         self._cr.execute(query)
@@ -1404,6 +1411,7 @@ class SpedFile(models.Model):
                     where
                         ((fd.code='55') or (d.nfe_modelo = '55') or (d.nfe_modelo = '1'))
                         and d.state in ('open','paid')
+                        and ((ie.state is null) or (ie.state = 'done'))
                         and d.fiscal_position_id is not null 
                         and ((d.valor_icms_uf_dest > 0) or 
                         (d.valor_icms_uf_remet > 0))
@@ -1459,6 +1467,7 @@ class SpedFile(models.Model):
                     where
                         ((fd.code='55') or (d.nfe_modelo = '55') or (d.nfe_modelo = '1'))
                         and d.state in ('open','paid')
+                        and ((ie.state is null) or (ie.state = 'done'))
                         and d.fiscal_position_id is not null 
                         and ((d.valor_icms_uf_dest > 0) or 
                         (d.valor_icms_uf_remet > 0))
@@ -1495,6 +1504,7 @@ class SpedFile(models.Model):
                     where
                         ((fd.code='55') or (d.nfe_modelo = '55') or (d.nfe_modelo = '1'))
                         and d.state in ('open','paid')
+                        and ((ie.state is null) or (ie.state = 'done'))
                         and d.fiscal_position_id is not null 
                         and ((d.valor_icms_uf_dest > 0) or 
                         (d.valor_icms_uf_remet > 0))
@@ -1562,6 +1572,7 @@ class SpedFile(models.Model):
                     where
                         ((fd.code='55') or (d.nfe_modelo = '55') or (d.nfe_modelo = '1'))
                         and d.state in ('open','paid')
+                        and ((ie.state is null) or (ie.state = 'done'))
                         and d.fiscal_position_id is not null 
                         and ((d.valor_icms_uf_dest > 0) or 
                         (d.valor_icms_uf_remet > 0))
@@ -1598,6 +1609,7 @@ class SpedFile(models.Model):
                     where
                         ((fd.code='55') or (d.nfe_modelo = '55') or (d.nfe_modelo = '1'))
                         and d.state in ('open','paid')
+                        and ((ie.state is null) or (ie.state = 'done'))
                         and d.fiscal_position_id is not null 
                         and ((d.valor_icms_uf_dest > 0) or 
                         (d.valor_icms_uf_remet > 0))
@@ -1656,6 +1668,7 @@ class SpedFile(models.Model):
                     where    
                         ((fd.code='55') or (d.nfe_modelo = '55') or (d.nfe_modelo = '1'))
                         and d.state in ('open','paid')
+                        and ((ie.state is null) or (ie.state = 'done'))
                         and d.fiscal_position_id is not null 
                         and %s
                     group by dl.ipi_cst,
@@ -1702,6 +1715,7 @@ class SpedFile(models.Model):
                     where    
                         ((fd.code='55') or (d.nfe_modelo = '55') or (d.nfe_modelo = '1'))
                         and d.state in ('open','paid')
+                        and ((ie.state is null) or (ie.state = 'done'))
                         and d.fiscal_position_id is not null 
                         and substr(cfop.code, 1,1) in ('5','6')
                         and %s
@@ -1744,6 +1758,7 @@ class SpedFile(models.Model):
                     where    
                         ((fd.code='55') or (d.nfe_modelo = '55') or (d.nfe_modelo = '1'))
                         and d.state in ('open','paid')
+                        and ((ie.state is null) or (ie.state = 'done'))
                         and d.fiscal_position_id is not null 
                         and substr(cfop.code, 1,1) in ('1','2','3')
                         and %s
