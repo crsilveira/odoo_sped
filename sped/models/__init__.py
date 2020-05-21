@@ -19,3 +19,4 @@
 from . import product
 from . import sped_file
 from . import sped_efd
+from . import sped_piscofins

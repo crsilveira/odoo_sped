@@ -20,6 +20,7 @@
         'views/product_view.xml',
         'views/sped_view.xml',
         'views/sped_efd_view.xml',
+        'views/sped_piscofins_view.xml',
     ],
     'demo': [],
     'installable': True,
