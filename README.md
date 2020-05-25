@@ -1,5 +1,5 @@
 # odoo_sped
-Sped ICMS-IPI , executado sobre o https://github.com/Trust-Code/odoo-brasil
+Sped ICMS-IPI e Sped Contribuições (PIS/COFINS) , executado sobre o https://github.com/Trust-Code/odoo-brasil
 
 Modulo nfe_purchase_import , não é utilizado mais, o xml de entrada é importado direto no invoice_eletronic , com o modulo br_account_invoice_xml.
 
