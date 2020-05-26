@@ -1,4 +1,10 @@
 # odoo_sped
+
+Modulo em desuso, substituido pelo br_sped_base (Trust-Code), 
+e pelos modulos  br_sped_efd_icms_ipi, e br_sped_efd_contribuicoes
+
+
+
 Sped ICMS-IPI
 
 Modulo nfe_purchase_import , não é utilizado mais, o xml de entrada é importado direto no invoice_eletronic , com o modulo br_account_invoice_xml.
